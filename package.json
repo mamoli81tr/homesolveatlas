@@ -1,0 +1,48 @@
+{
+  "name": "homesolveatlas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HomeSolveAtlas — Practical solutions for everyday home problems.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "validate-content": "tsx scripts/validate-content.ts",
+    "validate-production": "tsx scripts/validate-production.ts"
+  },
+  "dependencies": {
+    "clsx": "2.1.1",
+    "gray-matter": "4.0.3",
+    "lucide-react": "0.544.0",
+    "next": "16.3.0",
+    "next-mdx-remote": "6.0.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "reading-time": "1.5.0",
+    "rehype-slug": "6.0.0",
+    "remark-gfm": "4.0.1",
+    "tailwind-merge": "3.6.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "24.9.2",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.4",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.0",
+    "postcss": "8.5.26",
+    "prettier": "3.9.6",
+    "prettier-plugin-tailwindcss": "0.6.14",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.11",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
