@@ -14,22 +14,29 @@ import type { NextConfig } from "next";
 // Removing it would require a per-request nonce threaded through every
 // layout — a real architecture change, intentionally out of scope here.
 //
-// EXTEND THIS when you enable real ad/analytics scripts (see config/ads.ts
-// and .env.example) — nothing below is pre-opened for them:
-//   Google Analytics (GA4):
-//     script-src: + https://www.googletagmanager.com
-//     connect-src: + https://www.google-analytics.com https://*.google-analytics.com
+// Google Analytics (GA4) is live (see components/layout/Analytics.tsx,
+// gated on NEXT_PUBLIC_GA_MEASUREMENT_ID + analytics consent) and needs:
+//   script-src: https://www.googletagmanager.com — serves gtag.js itself
+//   connect-src: https://www.google-analytics.com https://*.google-analytics.com
+//                https://analytics.google.com https://*.analytics.google.com
+//                — gtag.js's own beacon/collect requests (including the
+//                regional subdomains like region1.google-analytics.com)
+// img-src already allows any https: origin, which covers GA's rare
+// no-JS/no-fetch pixel fallback — no img-src change needed for GA.
+//
+// EXTEND THIS FURTHER when you enable AdSense (see config/ads.ts and
+// .env.example) — nothing below is pre-opened for it yet:
 //   Google AdSense:
 //     script-src: + https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net
 //     frame-src:  + https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.google.com
 //     connect-src: + https://pagead2.googlesyndication.com
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com",
   "frame-src 'self'",
   "base-uri 'self'",
   "form-action 'self'",
