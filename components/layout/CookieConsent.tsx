@@ -7,18 +7,46 @@ import { setStoredConsent } from "@/lib/consent/storage";
 import { useConsent } from "@/lib/consent/useConsent";
 import type { ConsentState } from "@/lib/consent/types";
 import { Button } from "@/components/ui/Button";
+import { buildConsentModeUpdate } from "@/lib/consent/googleConsentMode";
+import { useGoogleCmpStatus, shouldShowCustomBanner } from "@/lib/consent/googleCmpStatus";
 
+const CMP_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID?.trim());
+
+/**
+ * HomeSolveAtlas's own consent banner. Suppressed whenever Google's
+ * certified CMP (Funding Choices, see GoogleCmp.tsx) is configured and
+ * either still resolving or already active for this visitor — so the two
+ * never show at once — falling back to this banner if the CMP is
+ * unconfigured or fails to load. See lib/consent/googleCmpStatus.ts for the
+ * exact decision rule.
+ */
 export function CookieConsent() {
   const consent = useConsent();
+  const cmpStatus = useGoogleCmpStatus(CMP_CONFIGURED);
   const [customizing, setCustomizing] = useState(false);
   const [analytics, setAnalytics] = useState(false);
   const [advertising, setAdvertising] = useState(false);
 
   function persist(state: Omit<ConsentState, "necessary">) {
     setStoredConsent(state);
+    // Echo the choice into Google Consent Mode too, so any current/future
+    // Google tag (GA4 now, AdSense once enabled) reads the same decision
+    // this banner just recorded — see lib/consent/googleConsentMode.ts.
+    // `gtag` is always defined by ConsentModeBootstrap.tsx before this
+    // component can render, but the optional call guards against a build
+    // order changing that guarantee later.
+    window.gtag?.("consent", "update", buildConsentModeUpdate(state));
   }
 
-  if (consent !== null) return null;
+  if (
+    !shouldShowCustomBanner({
+      hasStoredConsent: consent !== null,
+      cmpConfigured: CMP_CONFIGURED,
+      cmpStatus,
+    })
+  ) {
+    return null;
+  }
 
   return (
     <div

@@ -228,6 +228,10 @@ the 70%-mark ad. A short troubleshooting note never gets buried in as many ads a
 Ads only render for real once `adsConfig.enabled` is `true` **and** the visitor has accepted
 the "Advertising" cookie category — this is enforced in `AdSlot.tsx`, not just documented.
 
+Note: setting `NEXT_PUBLIC_ADSENSE_CLIENT_ID` already loads Google's certified CMP (step 1 of
+this list), independently of `enabled` — see "Google Consent Mode & Google's certified CMP"
+below. That's intentional: consent collection is meant to go live before ads do.
+
 ---
 
 ## Rebranding
@@ -435,6 +439,48 @@ decision is exposed reactively to the rest of the app via `useConsent()`
 (`lib/consent/useConsent.ts`, backed by `useSyncExternalStore` so it updates instantly across
 components without prop-drilling). Both `AdSlot` and `Analytics` check this before loading
 anything.
+
+### Google Consent Mode & Google's certified CMP
+
+AdSense's certified Google CMP (Funding Choices) can be turned on in **AdSense → Privacy &
+messaging** to show its own regulatory consent message to EEA/UK/Switzerland visitors — this is
+supported independently of ads actually serving, and is how HomeSolveAtlas prepares for consent
+collection while its AdSense site review is still pending. The custom banner above and Google's
+CMP are wired together so they never show at once:
+
+- **`components/layout/ConsentModeBootstrap.tsx`** — mounted first, unconditionally, via
+  `beforeInteractive`. Defines the shared `window.gtag`/`dataLayer`, sets [Google Consent
+  Mode](https://developers.google.com/tag-platform/security/guides/consent) v2 to fully
+  **denied** by default (`analytics_storage`, `ad_storage`, `ad_user_data`,
+  `ad_personalization` — see `lib/consent/googleConsentMode.ts`), and resyncs an
+  already-stored choice from a prior visit. No region list is used — deny-by-default applies
+  everywhere, matching the site's existing behavior rather than weakening it outside the EEA.
+- **`components/layout/GoogleCmp.tsx`** — loads Google's Funding Choices CMP script, gated on
+  `NEXT_PUBLIC_ADSENSE_CLIENT_ID` (see `.env.example`). Renders nothing when that's unset — the
+  site's exact current behavior.
+- **`lib/consent/googleCmpStatus.ts`** — tracks the CMP's lifecycle via Google's own documented
+  `googlefc.callbackQueue` / `CONSENT_DATA_READY` signal (never geolocation or IP detection —
+  see `useGoogleCmpStatus()`), and a pure, unit-tested decision function,
+  `shouldShowCustomBanner()`: hide our banner whenever the CMP is configured and still resolving
+  or already active; fall back to showing it if the CMP isn't configured, or fails to load
+  within 3 seconds (blocked script, network failure). This is a deliberate design choice: rather
+  than re-deriving "is this visitor in the EEA/UK/CH" ourselves, the site defers entirely to
+  Google's CMP once it's configured, trusting it (a managed, Google-maintained CMP) to decide
+  per-visitor whether a message is needed — the region logic lives in the AdSense console, not
+  duplicated here.
+- **`components/layout/ConsentModeBridge.tsx`** — the one path through which Google's CMP (or
+  anyone calling the shared `gtag('consent', ...)`) can update the site's own consent store, so
+  `useConsent()`-gated components (`Analytics.tsx` today, `AdSlot.tsx` once ads are enabled)
+  respect a decision made through Google's CMP UI exactly as they already respect the custom
+  banner. `lib/consent/googleConsentMode.ts` maps between the two vocabularies
+  (`{analytics, advertising}` ↔ the four Consent Mode signals) in both directions.
+- The custom banner also **echoes its own choices** into Consent Mode
+  (`gtag('consent', 'update', ...)`) when a visitor uses it, so any current/future Google tag
+  reads a consistent signal regardless of which UI produced the decision.
+
+GA4 is unaffected: `Analytics.tsx` still only injects the gtag.js script tag after
+`consent.analytics` is `true` — from either source — so there is no scenario where GA4 begins
+collecting before an explicit, resolved choice.
 
 ---
 

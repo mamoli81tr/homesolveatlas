@@ -24,20 +24,28 @@ import type { NextConfig } from "next";
 // img-src already allows any https: origin, which covers GA's rare
 // no-JS/no-fetch pixel fallback — no img-src change needed for GA.
 //
-// EXTEND THIS FURTHER when you enable AdSense (see config/ads.ts and
-// .env.example) — nothing below is pre-opened for it yet:
+// Google's certified CMP (Funding Choices — see components/layout/GoogleCmp.tsx,
+// gated on NEXT_PUBLIC_ADSENSE_CLIENT_ID) is also live and needs:
+//   script-src: https://fundingchoicesmessages.google.com — the CMP script itself
+//   frame-src:  https://fundingchoicesmessages.google.com — its consent-message iframe
+//   connect-src: https://fundingchoicesmessages.google.com — message/consent-status pings
+// This is independent of ads actually serving — config/ads.ts's `enabled`
+// flag stays false until the AdSense site review completes.
+//
+// EXTEND THIS FURTHER when you enable AdSense itself (see config/ads.ts and
+// .env.example) — nothing below is pre-opened for serving actual ads yet:
 //   Google AdSense:
 //     script-src: + https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net
 //     frame-src:  + https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://www.google.com
 //     connect-src: + https://pagead2.googlesyndication.com
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com",
+  "script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://fundingchoicesmessages.google.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com",
-  "frame-src 'self'",
+  "connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://fundingchoicesmessages.google.com",
+  "frame-src 'self' https://fundingchoicesmessages.google.com",
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",

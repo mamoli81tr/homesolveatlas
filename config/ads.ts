@@ -17,6 +17,14 @@
  *    AdSense's domains (googlesyndication.com, doubleclick.net, etc.).
  *
  * See README.md → "How to add real ad code" for the full walkthrough.
+ *
+ * ── Google's certified CMP (Funding Choices) is separate from this file ──
+ * `NEXT_PUBLIC_ADSENSE_CLIENT_ID` alone (independent of `enabled` here)
+ * already loads Google's consent-collection CMP for EEA/UK/Switzerland —
+ * see components/layout/GoogleCmp.tsx and README.md → "Google Consent Mode
+ * & Google's certified CMP". This lets consent collection go live ahead of
+ * ads themselves, which is intentional while an AdSense site review is
+ * pending — flipping `enabled` here has no effect on the CMP either way.
  */
 
 export type AdPlacement =

@@ -5,6 +5,9 @@ import { siteConfig } from "@/config/site";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { CookieConsent } from "@/components/layout/CookieConsent";
+import { ConsentModeBootstrap } from "@/components/layout/ConsentModeBootstrap";
+import { ConsentModeBridge } from "@/components/layout/ConsentModeBridge";
+import { GoogleCmp } from "@/components/layout/GoogleCmp";
 import { Analytics } from "@/components/layout/Analytics";
 import { SkipLink } from "@/components/layout/SkipLink";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -68,6 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang={siteConfig.language} className={inter.variable}>
       <body className="flex min-h-screen flex-col font-sans antialiased">
+        <ConsentModeBootstrap />
         <SkipLink />
         <JsonLd data={organizationSchema()} />
         <JsonLd data={websiteSchema()} />
@@ -76,7 +80,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
         </main>
         <Footer />
+        <ConsentModeBridge />
         <CookieConsent />
+        <GoogleCmp />
         <Analytics />
       </body>
     </html>
