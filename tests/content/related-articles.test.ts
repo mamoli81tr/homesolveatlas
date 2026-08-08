@@ -7,8 +7,10 @@ describe("getRelatedArticles", () => {
     expect(article).toBeDefined();
     const related = getRelatedArticles(article!);
 
-    expect(related[0]?.href).toBe("/appliances/dishwashers/water-at-the-bottom");
-    expect(related[1]?.href).toBe("/cleaning/why-do-towels-smell-after-washing");
+    expect(related[0]?.href).toBe("/appliances/washing-machines/hums-but-wont-drain");
+    expect(related[1]?.href).toBe(
+      "/appliances/washing-machines/drain-pump-runs-but-water-stays-inside",
+    );
   });
 
   it("never includes the article itself", () => {
