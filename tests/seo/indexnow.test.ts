@@ -8,9 +8,15 @@ import {
   isIndexNowConfigured,
   getIndexNowKeyLocation,
   submitToIndexNow,
+  getAllSitemapEligibleUrls,
+  filterByCooldown,
+  indexNowStateKey,
+  chunkUrls,
   INDEXNOW_HOST,
   INDEXNOW_ENDPOINT,
+  INDEXNOW_BATCH_SIZE,
 } from "@/lib/seo/indexnow";
+import { getPublicUrlPaths } from "@/lib/seo/publicUrls";
 
 // A real, published article href — guaranteed sitemap-eligible.
 const REAL_ARTICLE_PATH = "/appliances/dishwashers/spray-arm-not-spinning";
@@ -221,5 +227,125 @@ describe("submitToIndexNow", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     const result = await submitToIndexNow([REAL_ARTICLE_URL, REAL_ARTICLE_URL], { fetchImpl });
     expect(result.submitted).toEqual([REAL_ARTICLE_URL]);
+  });
+});
+
+describe("getAllSitemapEligibleUrls — backs `--all`", () => {
+  it("uses the exact same sitemap-eligible path set as app/sitemap.ts's own filters", () => {
+    const urls = getAllSitemapEligibleUrls();
+    const paths = getPublicUrlPaths();
+    expect(urls).toHaveLength(new Set(paths).size);
+    expect(new Set(urls)).toEqual(new Set(paths.map((p) => `https://${INDEXNOW_HOST}${p}`)));
+  });
+
+  it("includes the homepage, an appliance hub, and a real article", () => {
+    const urls = getAllSitemapEligibleUrls();
+    expect(urls).toContain(`https://${INDEXNOW_HOST}/`);
+    expect(urls).toContain(`https://${INDEXNOW_HOST}/appliances/dishwashers`);
+    expect(urls).toContain(REAL_ARTICLE_URL);
+  });
+
+  it("excludes /search (never in the sitemap-eligible path set)", () => {
+    const urls = getAllSitemapEligibleUrls();
+    expect(urls).not.toContain(`https://${INDEXNOW_HOST}/search`);
+  });
+
+  it("deduplicates — no path appears twice", () => {
+    const urls = getAllSitemapEligibleUrls();
+    expect(new Set(urls).size).toBe(urls.length);
+  });
+
+  it("never allows external domains — every URL is on the production host", () => {
+    const urls = getAllSitemapEligibleUrls();
+    for (const url of urls) {
+      expect(new URL(url).hostname).toBe(INDEXNOW_HOST);
+      expect(new URL(url).protocol).toBe("https:");
+    }
+  });
+
+  it("every returned URL independently passes validateIndexNowUrl", () => {
+    const urls = getAllSitemapEligibleUrls();
+    for (const url of urls) {
+      expect(validateIndexNowUrl(url).ok).toBe(true);
+    }
+  });
+
+  it("excludes draft content and thin/noindexed hubs implicitly, by construction", () => {
+    // getAllSitemapEligibleUrls() is built directly from getPublicUrlPaths(),
+    // which already excludes draft:true articles (see lib/content/loader.ts)
+    // and hubs below HUB_INDEX_THRESHOLD (see lib/content/queries.ts) — so
+    // there is nothing extra to filter here, and no second hand-maintained
+    // rule set that could drift from the sitemap's own filters.
+    const urls = getAllSitemapEligibleUrls();
+    const paths = new Set(getPublicUrlPaths());
+    for (const url of urls) {
+      expect(paths.has(new URL(url).pathname)).toBe(true);
+    }
+  });
+});
+
+describe("filterByCooldown", () => {
+  const url1 = REAL_ARTICLE_URL;
+  const url2 = `https://${INDEXNOW_HOST}/appliances/dishwashers/top-rack-not-cleaning`;
+
+  it("submits everything when there is no prior submission state", () => {
+    const result = filterByCooldown([url1, url2], "update", {});
+    expect(result.toSubmit).toEqual([url1, url2]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("skips a URL submitted (same event) within the cooldown window", () => {
+    const now = Date.now();
+    const state = { [indexNowStateKey("update", url1)]: new Date(now - 1000).toISOString() };
+    const result = filterByCooldown([url1, url2], "update", state, { now });
+    expect(result.toSubmit).toEqual([url2]);
+    expect(result.skipped).toEqual([url1]);
+  });
+
+  it("resubmits a URL once the cooldown window has passed", () => {
+    const now = Date.now();
+    const twentyFiveHoursAgo = now - 25 * 60 * 60 * 1000;
+    const state = { [indexNowStateKey("update", url1)]: new Date(twentyFiveHoursAgo).toISOString() };
+    const result = filterByCooldown([url1], "update", state, { now });
+    expect(result.toSubmit).toEqual([url1]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("--force bypasses the cooldown even for a recent submission", () => {
+    const now = Date.now();
+    const state = { [indexNowStateKey("update", url1)]: new Date(now - 1000).toISOString() };
+    const result = filterByCooldown([url1], "update", state, { now, force: true });
+    expect(result.toSubmit).toEqual([url1]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("tracks cooldown per event — an 'update' submission doesn't suppress a 'delete' of the same URL", () => {
+    const now = Date.now();
+    const state = { [indexNowStateKey("update", url1)]: new Date(now - 1000).toISOString() };
+    const result = filterByCooldown([url1], "delete", state, { now });
+    expect(result.toSubmit).toEqual([url1]);
+  });
+});
+
+describe("chunkUrls — batching", () => {
+  it("returns a single batch when under the batch size", () => {
+    const urls = ["a", "b", "c"];
+    expect(chunkUrls(urls, 10)).toEqual([["a", "b", "c"]]);
+  });
+
+  it("splits into multiple batches when over the batch size", () => {
+    const urls = ["a", "b", "c", "d", "e"];
+    expect(chunkUrls(urls, 2)).toEqual([["a", "b"], ["c", "d"], ["e"]]);
+  });
+
+  it("returns no batches for empty input", () => {
+    expect(chunkUrls([], 10)).toEqual([]);
+  });
+
+  it("defaults to INDEXNOW_BATCH_SIZE, keeping today's site in a single batch", () => {
+    const urls = getAllSitemapEligibleUrls();
+    const batches = chunkUrls(urls);
+    expect(urls.length).toBeLessThan(INDEXNOW_BATCH_SIZE);
+    expect(batches).toHaveLength(1);
   });
 });

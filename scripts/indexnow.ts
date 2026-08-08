@@ -7,6 +7,9 @@
  *   npm run indexnow -- --changed                 Submit URLs derived from article
  *                                                  content changed since HEAD~1
  *   npm run indexnow -- --changed --since=<ref>   Use a different base git ref
+ *   npm run indexnow -- --all                     Submit all sitemap-eligible public URLs
+ *   npm run indexnow -- --all --force             Submit all public URLs while bypassing
+ *                                                  the local cooldown
  *   npm run indexnow -- --force                   Bypass the local resubmission cooldown
  *   npm run indexnow:changed                      Shortcut for `--changed`
  *
@@ -25,17 +28,18 @@ import { getPublicUrlPathSet } from "../lib/seo/publicUrls";
 import {
   submitToIndexNow,
   getIndexNowKey,
+  getAllSitemapEligibleUrls,
+  filterByCooldown,
+  indexNowStateKey,
+  chunkUrls,
+  dedupeUrls,
   INDEXNOW_HOST,
   INDEXNOW_ENDPOINT,
+  INDEXNOW_BATCH_SIZE,
   type IndexNowEvent,
 } from "../lib/seo/indexnow";
 
 const STATE_FILE = path.join(process.cwd(), ".indexnow-submissions.json");
-// Avoids resubmitting the same URL+event on every deploy when nothing about
-// it actually changed. Not a correctness mechanism (a real change is never
-// blocked from being submitted eventually — the next run past the cooldown
-// picks it up) — just spam avoidance, and safe to delete this file any time.
-const COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const CONTENT_DIR = path.join("content", "articles");
 
 type SubmissionState = Record<string, string>; // "event:url" -> ISO timestamp
@@ -52,13 +56,10 @@ function saveState(state: SubmissionState) {
   fs.writeFileSync(STATE_FILE, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
 }
 
-function stateKey(event: IndexNowEvent, url: string): string {
-  return `${event}:${url}`;
-}
-
 interface CliArgs {
   urls: string[];
   changed: boolean;
+  all: boolean;
   since: string;
   force: boolean;
   event: IndexNowEvent;
@@ -73,6 +74,10 @@ IndexNow submission CLI
   npm run indexnow -- --changed                 Submit URLs derived from article
                                                  content changed since HEAD~1
   npm run indexnow -- --changed --since=<ref>   Use a different base git ref
+  npm run indexnow -- --all
+      Submit all sitemap-eligible public URLs
+  npm run indexnow -- --all --force
+      Submit all public URLs while bypassing the local cooldown
   npm run indexnow -- --force                   Bypass the local resubmission cooldown
 
   npm run indexnow:changed                      Shortcut for --changed
@@ -85,12 +90,14 @@ already be part of the site's sitemap-eligible URL set.
 function parseArgs(argv: string[]): CliArgs {
   const urls: string[] = [];
   let changed = false;
+  let all = false;
   let since = "HEAD~1";
   let force = false;
   let event: IndexNowEvent = "update";
 
   for (const arg of argv) {
     if (arg === "--changed") changed = true;
+    else if (arg === "--all") all = true;
     else if (arg.startsWith("--since=")) since = arg.slice("--since=".length);
     else if (arg === "--force") force = true;
     else if (arg === "--delete") event = "delete";
@@ -106,7 +113,7 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  return { urls, changed, since, force, event };
+  return { urls, changed, all, since, force, event };
 }
 
 /** Parses frontmatter from raw MDX text and returns its computed href, or null if invalid. */
@@ -215,22 +222,19 @@ function getChangedContentUrls(since: string): ChangedContentUrls {
   return { updates: Array.from(updates), deletes: Array.from(deletes) };
 }
 
+/**
+ * Applies the local resubmission cooldown, then submits whatever's left to
+ * IndexNow in one or more IndexNow-compatible batches (chunked at
+ * INDEXNOW_BATCH_SIZE — a single batch at the site's current URL count).
+ * Shared by every submission mode (explicit URLs, --changed, --all) so
+ * cooldown/batching/reporting behavior can't drift between them.
+ */
 async function runSubmission(urls: string[], event: IndexNowEvent, force: boolean) {
-  if (urls.length === 0) return;
+  const deduped = dedupeUrls(urls);
+  if (deduped.length === 0) return;
 
   const state = loadState();
-  const now = Date.now();
-  const toSubmit: string[] = [];
-  const skipped: string[] = [];
-
-  for (const url of urls) {
-    const last = state[stateKey(event, url)];
-    if (!force && last && now - new Date(last).getTime() < COOLDOWN_MS) {
-      skipped.push(url);
-    } else {
-      toSubmit.push(url);
-    }
-  }
+  const { toSubmit, skipped } = filterByCooldown(deduped, event, state, { force });
 
   if (skipped.length) {
     console.log(
@@ -244,44 +248,65 @@ async function runSubmission(urls: string[], event: IndexNowEvent, force: boolea
     return;
   }
 
-  console.log(`\nSubmitting ${toSubmit.length} URL(s) as "${event}" to ${INDEXNOW_ENDPOINT}:`);
+  const batches = chunkUrls(toSubmit, INDEXNOW_BATCH_SIZE);
+  console.log(
+    batches.length > 1
+      ? `\nSubmitting ${toSubmit.length} URL(s) as "${event}" in ${batches.length} batches (max ${INDEXNOW_BATCH_SIZE} per request) to ${INDEXNOW_ENDPOINT}:`
+      : `\nSubmitting ${toSubmit.length} URL(s) as "${event}" to ${INDEXNOW_ENDPOINT}:`,
+  );
   for (const u of toSubmit) console.log(`  - ${u}`);
 
-  const result = await submitToIndexNow(toSubmit, { event });
+  const timestamp = new Date().toISOString();
+  const allRejected: Array<{ url: string; reason: string }> = [];
+  let anyAccepted = false;
+  let anyFailed = false;
 
-  if (result.rejected.length) {
-    console.log(`\n${result.rejected.length} URL(s) rejected before submission:`);
-    for (const r of result.rejected) console.log(`  - ${r.url} — ${r.reason}`);
+  for (const [i, batch] of batches.entries()) {
+    if (batches.length > 1) {
+      console.log(`\nBatch ${i + 1}/${batches.length} (${batch.length} URL(s))...`);
+    }
+
+    const result = await submitToIndexNow(batch, { event });
+    if (result.rejected.length) allRejected.push(...result.rejected);
+
+    if (result.error) {
+      console.error(`✖ ${result.error}`);
+      anyFailed = true;
+      continue;
+    }
+    if (!result.response) {
+      console.log("Nothing was sent for this batch (every URL was rejected before submission).");
+      continue;
+    }
+    if (result.response.ok) {
+      console.log(`✔ Batch accepted by IndexNow (HTTP ${result.response.status}).`);
+      anyAccepted = true;
+      for (const u of result.submitted) state[indexNowStateKey(event, u)] = timestamp;
+    } else {
+      console.error(`✖ IndexNow responded with HTTP ${result.response.status} — not accepted.`);
+      anyFailed = true;
+    }
   }
 
-  if (result.error) {
-    console.error(`\n✖ ${result.error}`);
-    process.exitCode = 1;
-    return;
+  if (allRejected.length) {
+    console.log(`\n${allRejected.length} URL(s) rejected before submission:`);
+    for (const r of allRejected) console.log(`  - ${r.url} — ${r.reason}`);
   }
 
-  if (!result.response) {
-    console.log("\nNothing was sent (every URL was rejected before submission).");
-    return;
-  }
-
-  if (result.response.ok) {
-    console.log(
-      `\n✔ Submission accepted by IndexNow (HTTP ${result.response.status}). This confirms the request was received — it does not guarantee or measure indexing.`,
-    );
-    const timestamp = new Date().toISOString();
-    for (const u of result.submitted) state[stateKey(event, u)] = timestamp;
+  if (anyAccepted) {
     saveState(state);
-  } else {
-    console.error(
-      `\n✖ IndexNow responded with HTTP ${result.response.status} — submission was not accepted.`,
+    console.log(
+      "\n✔ Submission accepted by IndexNow. This confirms the request(s) were received — it does not guarantee or measure indexing.",
     );
+  }
+
+  if (anyFailed) {
     process.exitCode = 1;
   }
 }
 
 async function main() {
-  const { urls, changed, since, force, event } = parseArgs(process.argv.slice(2));
+  const { urls, changed, all, since, force, event } = parseArgs(process.argv.slice(2));
 
   if (!getIndexNowKey()) {
     console.error(
@@ -289,6 +314,16 @@ async function main() {
     );
     console.error('  See README.md → "INDEXNOW / BING" for how to generate a key.');
     process.exit(1);
+  }
+
+  if (all) {
+    // Same URL list app/sitemap.ts is built from — see lib/seo/publicUrls.ts
+    // and lib/seo/indexnow.ts's getAllSitemapEligibleUrls(). Not a second,
+    // hand-maintained list of sitemap rules.
+    const eligible = getAllSitemapEligibleUrls();
+    console.log(`Found ${eligible.length} sitemap-eligible URL(s).`);
+    await runSubmission(eligible, "update", force);
+    return;
   }
 
   if (changed) {

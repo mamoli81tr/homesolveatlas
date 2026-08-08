@@ -383,7 +383,27 @@ Wire this into CI/CD (e.g. a Vercel deploy hook or GitHub Action step running
 added as a Vercel build-time step here, since build environments don't reliably have the
 previous deployment's git ref available and a bad build shouldn't block or spam a submission.
 
-### 6. Check submissions in Bing Webmaster Tools
+### 6. One-time full-site submission
+
+For an initial bulk notification (e.g. right after this feature goes live, so IndexNow-aware
+engines learn about everything that's already published, not just what changes from here on):
+
+```bash
+npm run indexnow -- --all
+npm run indexnow -- --all --force   # bypass the 24h cooldown too
+```
+
+`--all` collects every currently sitemap-eligible URL via
+`getAllSitemapEligibleUrls()` in `lib/seo/indexnow.ts` — built directly from the same
+`getPublicUrlPaths()` function `app/sitemap.ts`'s own filters mirror (see
+`lib/seo/publicUrls.ts`), so this can never drift into a second, hand-maintained URL list. It
+prints how many eligible URLs it found, then runs through the same validation, deduplication,
+24-hour cooldown, and batching as every other submission mode — `--all` on its own **does not**
+bypass the cooldown; add `--force` explicitly if you want that. URLs are sent in
+IndexNow-compatible batches (max 10,000 per request — the whole site fits in one request today).
+Don't run this on every deploy; use `npm run indexnow:changed` for that instead.
+
+### 7. Check submissions in Bing Webmaster Tools
 
 1. Add `https://homesolveatlas.com` as a property in
    [Bing Webmaster Tools](https://www.bing.com/webmasters).
