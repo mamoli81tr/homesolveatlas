@@ -34,6 +34,10 @@ yarn-debug.log*
 yarn-error.log*
 .lighthouse/
 
+# IndexNow local submission-state cache (see scripts/indexnow.ts) — purely a
+# spam-avoidance cooldown tracker, safe to delete, not shared across machines
+.indexnow-submissions.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -57,6 +57,9 @@ npm run format               # Prettier --write
 npm run test                  # run the Vitest suite once
 npm run test:watch          # Vitest in watch mode
 npm run validate-content  # check every content file for structural problems
+npm run validate-production  # scan the built output for stray localhost/TODO strings
+npm run indexnow -- <url...>  # manually submit URL(s) to IndexNow — see "INDEXNOW / BING" below
+npm run indexnow:changed      # submit only content changed since the last commit
 ```
 
 ---
@@ -65,6 +68,7 @@ npm run validate-content  # check every content file for structural problems
 
 ```
 app/                    Routes (App Router) — pages, layouts, sitemap.ts, robots.ts, rss.xml
+proxy.ts                Serves the IndexNow key file at /{INDEXNOW_KEY}.txt — see "INDEXNOW / BING"
 components/
   ads/                    AdSlot (placeholder ad component), MobileStickyAd
   articles/               ArticleLayout, ArticleCard, TOC, FAQ accordion, related guides
@@ -80,7 +84,7 @@ content/
 lib/
   content/                Content loading, Zod schema, queries (filter/search/related), MDX render
   calculators/            Pure calculation functions + Zod schemas, one file per calculator
-  seo/                    Metadata builder, JSON-LD schema builders
+  seo/                    Metadata builder, JSON-LD schema builders, IndexNow (indexnow.ts, publicUrls.ts)
   consent/                Cookie-consent store (useSyncExternalStore-based)
   utils/                  cn(), slugify(), date formatting
 config/
@@ -93,6 +97,7 @@ scripts/
   validate-content.ts    Content QA script (see below)
   validate-production.ts Scans built .next output for stray localhost/example.com/old-brand
                           strings and source for TODO/FIXME — a pre-deploy gate
+  indexnow.ts             IndexNow submission CLI — see "INDEXNOW / BING" below
 tests/                    Vitest tests, mirrors lib/ structure
 ```
 
@@ -281,6 +286,124 @@ a `next/image` `<Image>` component.
 1. Set `NEXT_PUBLIC_GA_MEASUREMENT_ID` in `.env.local`.
 2. Nothing else to do — `components/layout/Analytics.tsx` is already mounted in the root layout
    and only loads the GA script once the visitor accepts the "Analytics" cookie category.
+
+---
+
+## INDEXNOW / BING
+
+[IndexNow](https://www.indexnow.org/) lets the site push a URL directly to participating search
+engines (Bing, and others sharing the same index) the moment it's published, updated, or removed,
+instead of waiting for the next crawl. It's entirely server-side/CLI tooling — nothing here runs
+in the browser, and it's **supplemental**: `sitemap.xml` (`app/sitemap.ts`) stays the complete,
+authoritative list of the site's URLs. IndexNow submission does not guarantee or speed up
+indexing; it only asks a search engine to take another look sooner.
+
+### 1. Create an IndexNow key
+
+Search engines don't issue this — you generate it yourself. Any random string works; a 32-char
+hex string or UUID is the usual convention. One easy way:
+
+```bash
+node -e "console.log(require('crypto').randomUUID().replace(/-/g, ''))"
+```
+
+### 2. Add `INDEXNOW_KEY` in Vercel
+
+Add it as an environment variable in the Vercel project (Settings → Environment Variables) —
+**Production** (and Preview, if you also want preview deploys to serve the key file). It's a
+plain server-side variable, deliberately **not** prefixed `NEXT_PUBLIC_`, so it's never bundled
+into client JavaScript or visible to the browser. Also add it to `.env.local` for local testing —
+see `.env.example`.
+
+Everything IndexNow-related no-ops safely while `INDEXNOW_KEY` is unset: the verification route
+isn't exposed, and `scripts/indexnow.ts` exits with a clear error instead of doing anything.
+
+### 3. Verify the key URL
+
+Once deployed with `INDEXNOW_KEY` set, the key is served as plain text at:
+
+```
+https://homesolveatlas.com/{INDEXNOW_KEY}.txt
+```
+
+e.g. if `INDEXNOW_KEY=abc123`, check `https://homesolveatlas.com/abc123.txt` returns `200` with
+a body of exactly `abc123`. This is implemented in `proxy.ts` (Next.js's `middleware.ts`
+convention, renamed in Next 16 — a single exact-pathname check; see the comment there for why
+this needed Proxy rather than an App Router route)
+using the pure, unit-tested `matchIndexNowKeyFile()` helper in `lib/seo/indexnow.ts`.
+
+### 4. Manually submit a URL
+
+```bash
+npm run indexnow -- https://homesolveatlas.com/appliances/washing-machines/hums-but-wont-drain
+```
+
+Accepts multiple URLs at once. URLs must be `https://homesolveatlas.com/...` (localhost, Vercel
+preview URLs, and other domains are rejected) and must already be part of the site's current
+sitemap-eligible URL set — this rejects draft articles, taxonomy hubs below the indexing
+threshold, and plain typos. If a page was intentionally removed and is no longer in the sitemap,
+submit its removal instead, which skips that sitemap-membership check:
+
+```bash
+npm run indexnow -- --delete https://homesolveatlas.com/appliances/dryers/old-removed-page
+```
+
+The script prints exactly which URLs it's about to submit, then reports whether IndexNow
+*accepted the submission* — it never claims a URL was indexed, only that the request was sent.
+To avoid spamming the API, a URL that was already submitted (successfully) in the last 24 hours
+is skipped on the next run unless you pass `--force`. This is tracked in a local,
+`.gitignore`d `.indexnow-submissions.json` — safe to delete any time, it's a cooldown cache, not
+a source of truth.
+
+### 5. Submit newly changed content
+
+Rather than resubmitting the entire sitemap on every deploy (which IndexNow explicitly asks
+integrators not to do), submit only what actually changed:
+
+```bash
+npm run indexnow:changed
+# equivalent to: npm run indexnow -- --changed
+
+# or diff against a specific point instead of the previous commit:
+npm run indexnow -- --changed --since=<git-ref>
+```
+
+This runs `git diff` over `content/articles/` between the given ref (default `HEAD~1`) and the
+working tree, maps each changed `.mdx` file to its canonical public URL via the same
+`getArticleHref()` the site itself uses, and:
+
+- submits added/modified articles (and their published, sitemap-eligible taxonomy hub, e.g. the
+  `/appliances/dishwashers` hub when a dishwasher article changes — its listing changed too) as
+  `"update"` events,
+- submits deleted articles (read from git history via `git show <ref>:<path>` so the URL can
+  still be computed after the file is gone) as `"delete"` events.
+
+Wire this into CI/CD (e.g. a Vercel deploy hook or GitHub Action step running
+`npm run indexnow:changed` after a successful deploy) if you want it fully automatic — it wasn't
+added as a Vercel build-time step here, since build environments don't reliably have the
+previous deployment's git ref available and a bad build shouldn't block or spam a submission.
+
+### 6. Check submissions in Bing Webmaster Tools
+
+1. Add `https://homesolveatlas.com` as a property in
+   [Bing Webmaster Tools](https://www.bing.com/webmasters).
+2. Verify ownership — Bing's XML/meta-tag method reuses the same
+   `NEXT_PUBLIC_BING_SITE_VERIFICATION` variable already wired into `app/layout.tsx`'s
+   `verification.other["msvalidate.01"]` metadata field (set it, redeploy, done — no code change
+   needed). This is independent of IndexNow and doesn't touch Google Search Console's own
+   verification.
+3. Bing Webmaster Tools → **IndexNow** in the sidebar shows recently submitted URLs and their
+   crawl status once Bing has processed them (not instant).
+
+### Reference
+
+- `lib/seo/indexnow.ts` — key handling, URL validation, payload building, submission.
+- `lib/seo/publicUrls.ts` — the shared "is this URL actually public" check (mirrors
+  `app/sitemap.ts`'s own filters).
+- `scripts/indexnow.ts` — the CLI.
+- `proxy.ts` — the `/{key}.txt` verification route.
+- `tests/seo/indexnow.test.ts`, `tests/seo/publicUrls.test.ts` — no test ever makes a real
+  network request; `submitToIndexNow()` takes an injectable `fetchImpl` for exactly this reason.
 
 ---
 
