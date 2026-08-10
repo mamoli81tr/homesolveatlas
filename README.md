@@ -458,16 +458,25 @@ CMP are wired together so they never show at once:
 - **`components/layout/GoogleCmp.tsx`** — loads Google's Funding Choices CMP script, gated on
   `NEXT_PUBLIC_ADSENSE_CLIENT_ID` (see `.env.example`). Renders nothing when that's unset — the
   site's exact current behavior.
-- **`lib/consent/googleCmpStatus.ts`** — tracks the CMP's lifecycle via Google's own documented
-  `googlefc.callbackQueue` / `CONSENT_DATA_READY` signal (never geolocation or IP detection —
-  see `useGoogleCmpStatus()`), and a pure, unit-tested decision function,
-  `shouldShowCustomBanner()`: hide our banner whenever the CMP is configured and still resolving
-  or already active; fall back to showing it if the CMP isn't configured, or fails to load
-  within 3 seconds (blocked script, network failure). This is a deliberate design choice: rather
-  than re-deriving "is this visitor in the EEA/UK/CH" ourselves, the site defers entirely to
-  Google's CMP once it's configured, trusting it (a managed, Google-maintained CMP) to decide
-  per-visitor whether a message is needed — the region logic lives in the AdSense console, not
-  duplicated here.
+- **`lib/consent/googleCmpStatus.ts`** — tracks the CMP's lifecycle via two of Google's own
+  documented signals (never geolocation, IP detection, or a hardcoded country list):
+  1. `googlefc.callbackQueue` / `CONSENT_DATA_READY` — "the CMP finished resolving something for
+     this visitor," whatever that determination was.
+  2. IAB TCF v2 `__tcfapi` `addEventListener` / `eventStatus === "cmpuishown"` — the
+     standardized signal that the CMP is **actively displaying its UI right now**. Google's
+     certified CMP is TCF-registered, so this fires for its EEA/UK/Switzerland message without
+     this code needing to know which regions those are.
+
+  These two are deliberately kept separate: a CMP that has *resolved* (signal 1) has **not**
+  necessarily *shown anything* to this visitor. `resolveGoogleCmpMessageState()` (pure,
+  unit-tested) turns the pair into `"showing-message"` (signal 2 fired — Case A) or
+  `"no-message-applicable"` (signal 1 fired without signal 2 — Case B) or `"pending"`. Only
+  `"showing-message"` — genuine positive confirmation the CMP put UI in front of the visitor —
+  suppresses the custom banner (see `shouldShowCustomBanner()`); a CMP that merely *loaded* or
+  *resolved silently* does not. This fixed a real cross-browser/cross-region bug: treating
+  "resolved" alone as authoritative hid the banner for any visitor Google's CMP decided not to
+  show a message to (e.g. non-EEA/UK/CH visitors in Chrome/Opera), leaving them with no consent
+  UI at all.
 - **`components/layout/ConsentModeBridge.tsx`** — the one path through which Google's CMP (or
   anyone calling the shared `gtag('consent', ...)`) can update the site's own consent store, so
   `useConsent()`-gated components (`Analytics.tsx` today, `AdSlot.tsx` once ads are enabled)

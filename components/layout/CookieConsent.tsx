@@ -13,12 +13,17 @@ import { useGoogleCmpStatus, shouldShowCustomBanner } from "@/lib/consent/google
 const CMP_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID?.trim());
 
 /**
- * HomeSolveAtlas's own consent banner. Suppressed whenever Google's
- * certified CMP (Funding Choices, see GoogleCmp.tsx) is configured and
- * either still resolving or already active for this visitor — so the two
- * never show at once — falling back to this banner if the CMP is
- * unconfigured or fails to load. See lib/consent/googleCmpStatus.ts for the
- * exact decision rule.
+ * HomeSolveAtlas's own consent banner. Suppressed ONLY when Google's
+ * certified CMP (Funding Choices, see GoogleCmp.tsx) has positively
+ * confirmed — via the IAB TCF v2 `cmpuishown` signal, not merely "the
+ * script loaded/resolved" — that it's actively displaying its own
+ * regulatory message to this visitor. Falls back to showing this banner
+ * when the CMP is unconfigured, still resolving with no message pending,
+ * determined no message applies to this visitor (e.g. outside the
+ * EEA/UK/Switzerland), or fails to load at all (e.g. blocked by Brave's
+ * shields). See lib/consent/googleCmpStatus.ts for the exact decision rule
+ * and why "CMP loaded successfully" alone is not sufficient to suppress
+ * this banner.
  */
 export function CookieConsent() {
   const consent = useConsent();
