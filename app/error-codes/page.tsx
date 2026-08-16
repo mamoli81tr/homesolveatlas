@@ -32,6 +32,11 @@ export default function ErrorCodesPage() {
         <p className="text-ink-500 mt-3 text-base leading-relaxed">
           {category.description}
         </p>
+        <p className="text-ink-500 mt-3 text-sm leading-relaxed">
+          Error codes vary by brand and sometimes by model, so start with your appliance
+          brand below. Each code page explains what the fault actually means, what&apos;s
+          safe to check yourself, and when it warrants a technician instead.
+        </p>
       </header>
 
       <AdSlot placement="header-banner" className="my-8" />

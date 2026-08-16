@@ -32,6 +32,11 @@ export default function AppliancesPage() {
         <p className="text-ink-500 mt-3 text-base leading-relaxed">
           {category.description}
         </p>
+        <p className="text-ink-500 mt-3 text-sm leading-relaxed">
+          Pick your appliance type below, then look for the guide title that matches what
+          you&apos;re actually seeing — most pages separate likely causes from less likely
+          ones and flag clearly when something needs a professional rather than a DIY fix.
+        </p>
       </header>
 
       <AdSlot placement="header-banner" className="my-8" />

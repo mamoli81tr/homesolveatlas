@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { adsConfig, type AdPlacement } from "@/config/ads";
+import { adsConfig, shouldRenderAdPlaceholder, type AdPlacement } from "@/config/ads";
 import { useConsent } from "@/lib/consent/useConsent";
 import { cn } from "@/lib/utils/cn";
 
@@ -12,9 +12,12 @@ import { cn } from "@/lib/utils/cn";
  * - Lazy-loads: the slot only "activates" once it scrolls near the viewport.
  * - Consent-gated: with `adsConfig.enabled = true`, the real ad script only
  *   renders after the visitor accepts the "Advertising" cookie category.
- * - Until a real ad network is wired up (see config/ads.ts), this always
- *   renders a clearly-labeled placeholder box — never a fake ad, never
- *   anything styled to look like a button or navigation.
+ * - Until a real ad network is wired up (see config/ads.ts), this renders a
+ *   clearly-labeled placeholder box in development only — see
+ *   `shouldRenderAdPlaceholder()` in config/ads.ts. In production, before
+ *   AdSense is enabled, it renders nothing at all rather than an empty
+ *   "Advertisement" box, so pages read as a finished content site. Never a
+ *   fake ad, never anything styled to look like a button or navigation.
  */
 export function AdSlot({
   placement,
@@ -46,6 +49,8 @@ export function AdSlot({
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
+
+  if (!shouldRenderAdPlaceholder()) return null;
 
   const showRealAd =
     adsConfig.enabled && consent?.advertising && definition.slotId && inView;

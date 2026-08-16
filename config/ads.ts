@@ -79,3 +79,29 @@ export const adsConfig: {
     },
   },
 };
+
+/**
+ * Whether `AdSlot`/`MobileStickyAd` should render anything at all — the box,
+ * its reserved space, everything.
+ *
+ * Once `enabled` is true (real ads live), this is always true — real ad
+ * markup always needs its slot. Before that, empty dashed "Advertisement —
+ * X" boxes only render in development, so a normal production visitor
+ * during the pre-AdSense-approval period sees a clean, complete-feeling
+ * content page instead of an ad template with the ads missing — not a
+ * placeholder skeleton, and not large empty vertical gaps.
+ *
+ * Set `NEXT_PUBLIC_AD_DEBUG=1` to preview placement boxes in a
+ * production build/deploy without flipping `enabled` — useful for
+ * reviewing ad density/layout before AdSense is actually turned on.
+ *
+ * The underlying architecture (placements, sizes, density logic in
+ * adDensity.ts, consent gating) is untouched either way — this only
+ * changes whether the *pre-approval* placeholder is visible, not whether
+ * the ad slot exists in the component tree.
+ */
+export function shouldRenderAdPlaceholder(): boolean {
+  if (adsConfig.enabled) return true;
+  if (process.env.NODE_ENV !== "production") return true;
+  return process.env.NEXT_PUBLIC_AD_DEBUG === "1";
+}

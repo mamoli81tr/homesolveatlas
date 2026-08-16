@@ -21,6 +21,7 @@ import { AuthorBio } from "@/components/articles/AuthorBio";
 import { AdSlot } from "@/components/ads/AdSlot";
 import { MobileStickyAd } from "@/components/ads/MobileStickyAd";
 import { getArticleAdPlan } from "@/components/ads/adDensity";
+import { shouldRenderAdPlaceholder } from "@/config/ads";
 import { ArticleThumb } from "@/components/media/ArticleThumb";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { ArticleBody } from "@/lib/content/mdx";
@@ -365,7 +366,7 @@ export function ArticleLayout({
         </div>
       </Container>
 
-      {adPlan.mobileSticky && (
+      {adPlan.mobileSticky && shouldRenderAdPlaceholder() && (
         <>
           <div className="h-14 md:hidden" aria-hidden="true" />
           <MobileStickyAd />
